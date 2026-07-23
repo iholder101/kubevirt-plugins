@@ -755,6 +755,18 @@ func TestGenerateMakefile(t *testing.T) {
 	if !strings.Contains(content, "docker") {
 		t.Fatalf("expected Makefile to contain docker fallback, got:\n%s", content)
 	}
+
+	if !strings.Contains(content, "GO_VERSION ?= 1.23.0") {
+		t.Fatalf("expected Makefile to contain GO_VERSION from go.mod, got:\n%s", content)
+	}
+
+	if !strings.Contains(content, "go test ./...") {
+		t.Fatalf("expected Makefile to contain test target, got:\n%s", content)
+	}
+
+	if !strings.Contains(content, "go vet ./...") {
+		t.Fatalf("expected Makefile to contain vet target, got:\n%s", content)
+	}
 }
 
 func TestGenerateCreatesOutputDir(t *testing.T) {

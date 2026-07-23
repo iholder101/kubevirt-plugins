@@ -214,14 +214,21 @@ TAG ?= latest
 IMAGE = $(REGISTRY)/{{.Name}}:$(TAG)
 
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || echo docker)
+GO_VERSION ?= {{ .GoVersion }}
 
-.PHONY: build push
+.PHONY: build push test vet
 
 build:
 	$(CONTAINER_ENGINE) build -t $(IMAGE) .
 
 push: build
 	$(CONTAINER_ENGINE) push $(IMAGE)
+
+test:
+	$(CONTAINER_ENGINE) run --rm -v $(PWD):/app:Z -v {{.Name}}-modcache:/go/pkg/mod:Z -v {{.Name}}-cache:/root/.cache/go-build:Z -w /app golang:$(GO_VERSION) go test ./...
+
+vet:
+	$(CONTAINER_ENGINE) run --rm -v $(PWD):/app:Z -v {{.Name}}-modcache:/go/pkg/mod:Z -v {{.Name}}-cache:/root/.cache/go-build:Z -w /app golang:$(GO_VERSION) go vet ./...
 `
 
 func (p *Plugin) WithRBACRules(rules []rbacv1.PolicyRule) *Plugin {
@@ -328,7 +335,10 @@ func (p *Plugin) generate(outputDir, sourceDir string) error {
 			return fmt.Errorf("write Dockerfile: %w", err)
 		}
 
-		makefileContent, err := renderTemplate(makefileTmplStr, struct{ Name string }{p.name})
+		makefileContent, err := renderTemplate(makefileTmplStr, struct {
+			Name      string
+			GoVersion string
+		}{p.name, goVersion})
 		if err != nil {
 			return err
 		}
