@@ -28,10 +28,17 @@ if [ -n "${FUNC_TEST_ARGS}" ]; then
     ARGS+=("${extra[@]}")
 fi
 
-# "go run" uses the ginkgo version pinned in go.mod, avoiding a separate install step.
-go run github.com/onsi/ginkgo/v2/ginkgo "${ARGS[@]}" \
-    ./tests/... \
-    -- \
-    -kubeconfig="${KUBECONFIG}" \
-    --container-prefix="${manifest_docker_prefix}" \
-    --artifacts="${ARTIFACTS}"
+# "go run" uses the ginkgo version pinned in go.mod, avoiding a separate
+# install step. Runs inside the dockerized builder by default so no local Go
+# toolchain is required; needs host networking to reach the kubevirtci
+# cluster's API server. Set KUBEVIRT_PLUGINS_SKIP_DOCKERIZED=true to run directly.
+#
+# Ginkgo changes its working directory to each suite's package directory
+# before running it, so -kubeconfig must be an absolute path - hence the two
+# different values below rather than one path shared across both branches.
+# hack/dockerized always bind-mounts the repo root at /workspace.
+if [ "${KUBEVIRT_PLUGINS_SKIP_DOCKERIZED:-}" = "true" ]; then
+    go run github.com/onsi/ginkgo/v2/ginkgo "${ARGS[@]}" ./tests/... -- -kubeconfig="${KUBECONFIG}" --container-prefix="${manifest_docker_prefix}" --artifacts="${ARTIFACTS}"
+else
+    DOCKERIZED_EXTRA_ARGS="--network=host" hack/dockerized go run github.com/onsi/ginkgo/v2/ginkgo "${ARGS[@]}" ./tests/... -- -kubeconfig="/workspace/_kubevirtci/_ci-configs/${KUBEVIRT_PROVIDER}/.kubeconfig" --container-prefix="${manifest_docker_prefix}" --artifacts="${ARTIFACTS}"
+fi

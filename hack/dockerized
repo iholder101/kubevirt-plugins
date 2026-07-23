@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Runs a command inside the builder container with the repo bind-mounted.
+# Usage: hack/dockerized make test
+#        hack/dockerized go vet ./...
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+
+if command -v podman &>/dev/null; then
+    ENGINE=podman
+elif command -v docker &>/dev/null; then
+    ENGINE=docker
+else
+    echo "Error: neither podman nor docker found in PATH" >&2
+    exit 1
+fi
+
+BUILDER_IMAGE=${BUILDER_IMAGE:-"kubevirt-plugins-builder"}
+DOCKERFILE="${SCRIPT_DIR}/builder/Dockerfile"
+
+# Extra container-engine flags for callers with special needs (e.g. functest,
+# which needs host networking to reach the kubevirtci cluster's API server).
+EXTRA_ENGINE_ARGS=()
+if [ -n "${DOCKERIZED_EXTRA_ARGS:-}" ]; then
+    read -ra EXTRA_ENGINE_ARGS <<< "${DOCKERIZED_EXTRA_ARGS}"
+fi
+
+# Tag the image with a hash of the Dockerfile so it auto-rebuilds on changes.
+if command -v sha256sum &>/dev/null; then
+    BUILDER_HASH=$(sha256sum "${DOCKERFILE}" | cut -d' ' -f1)
+else
+    BUILDER_HASH=$(shasum -a 256 "${DOCKERFILE}" | cut -d' ' -f1)
+fi
+IMAGE_TAG="${BUILDER_IMAGE}:${BUILDER_HASH:0:12}"
+
+if ! ${ENGINE} image inspect "${IMAGE_TAG}" &>/dev/null; then
+    echo "Building builder image..."
+    ${ENGINE} build -t "${IMAGE_TAG}" -f "${DOCKERFILE}" "${SCRIPT_DIR}/builder/"
+fi
+
+TTY_ARGS="-i"
+[ -t 0 ] && TTY_ARGS="-it"
+
+exec ${ENGINE} run --rm "${TTY_ARGS}" \
+    "${EXTRA_ENGINE_ARGS[@]}" \
+    -e KUBEVIRT_PLUGINS_SKIP_DOCKERIZED=true \
+    -v "${REPO_ROOT}:/workspace:Z" \
+    -w /workspace \
+    -v "${BUILDER_IMAGE}-modcache:/go/pkg/mod:Z" \
+    -v "${BUILDER_IMAGE}-cache:/root/.cache/go-build:Z" \
+    "${IMAGE_TAG}" \
+    "$@"
